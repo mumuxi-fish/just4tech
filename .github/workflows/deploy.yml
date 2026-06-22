@@ -5,7 +5,7 @@ on:
     branches: [main]
 
 jobs:
-  frontend:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,38 +22,24 @@ jobs:
           npm ci
           npm run build
 
-      - name: Deploy frontend
-        uses: easingthemes/ssh-deploy@v5
-        with:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          ARGS: -avz --delete --exclude '/uploads/*' --exclude '/sitemap.xml'
-          SOURCE: frontend/dist/
-          REMOTE_HOST: ${{ secrets.DEPLOY_HOST }}
-          REMOTE_USER: ${{ secrets.DEPLOY_USER }}
-          TARGET: /var/www/aitoolhub/spa/
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
 
-  backend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      - name: Deploy frontend
+        run: |
+          rsync -avz --delete --exclude '/uploads/*' --exclude '/sitemap.xml' \
+            frontend/dist/ ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/var/www/aitoolhub/spa/
 
       - name: Deploy backend
-        uses: easingthemes/ssh-deploy@v5
-        with:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          ARGS: -avz
-          SOURCE: backend/
-          REMOTE_HOST: ${{ secrets.DEPLOY_HOST }}
-          REMOTE_USER: ${{ secrets.DEPLOY_USER }}
-          TARGET: /home/ubuntu/aitoolhub-admin/
+        run: |
+          rsync -avz backend/ ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/home/ubuntu/aitoolhub-admin/ \
+            --exclude '__pycache__' --exclude '*.bak*' --exclude 'data/' --exclude 'static/uploads'
 
-      - name: Restart backend service
-        uses: appleboy/ssh-action@v1
-        with:
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          script: |
-            sudo systemctl restart aitoolhub-admin
-            sleep 2
-            curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8083/api/posts | grep 200 || echo "WARN: backend may be down"
+      - name: Restart backend
+        run: |
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            "sudo systemctl restart aitoolhub-admin && sleep 2 && curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8083/api/posts"
