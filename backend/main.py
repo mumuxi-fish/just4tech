@@ -441,8 +441,9 @@ async def _prewarm_icon_cache():
             cached += 1
             continue
         try:
+            fetch_url = _rewrite_icon_url(remote_url)
             async with httpx.AsyncClient(timeout=ICON_FETCH_TIMEOUT, headers=ICON_FETCH_HEADERS) as client:
-                resp = await client.get(remote_url, follow_redirects=True)
+                resp = await client.get(fetch_url, follow_redirects=True)
                 if resp.status_code == 200:
                     body = resp.read()
                     if len(body) <= ICON_MAX_SIZE:
@@ -491,6 +492,18 @@ ICON_FETCH_HEADERS = {
     "Accept": "image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5",
 }
 
+# URL rewriters for icon sources that block datacenter IPs.
+# Each returns a replacement fetch URL (or None to keep original).
+import re
+def _rewrite_icon_url(url: str) -> str:
+    """Rewrite known icon-service URLs to alternatives that don't block servers."""
+    # favicon.im → Google favicon service (server-friendly)
+    m = re.match(r'https?://favicon\.im/(.+)$', url)
+    if m:
+        domain = m.group(1).rstrip('/')
+        return f"https://www.google.com/s2/favicons?domain={domain}&sz=64"
+    return url  # keep original
+
 @app.get("/api/icon-proxy")
 async def api_icon_proxy(url: str = ""):
     """Proxy external icon URLs through our domain with disk caching.
@@ -506,7 +519,7 @@ async def api_icon_proxy(url: str = ""):
     if not remote_url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="Only http/https URLs are allowed")
 
-    # Hash the URL → cache key
+    # Hash the original URL → cache key (consistent with frontend)
     cache_key = hashlib.sha256(remote_url.encode()).hexdigest()
     cache_path = _os.path.join(ICON_CACHE_DIR, cache_key)
 
@@ -518,10 +531,13 @@ async def api_icon_proxy(url: str = ""):
             headers={"Cache-Control": "public, max-age=604800"},
         )
 
+    # Rewrite URL for sources that block datacenter IPs (e.g. favicon.im → Google)
+    fetch_url = _rewrite_icon_url(remote_url)
+
     # Fetch from remote
     try:
         async with httpx.AsyncClient(timeout=ICON_FETCH_TIMEOUT, headers=ICON_FETCH_HEADERS) as client:
-            resp = await client.get(remote_url, follow_redirects=True)
+            resp = await client.get(fetch_url, follow_redirects=True)
             if resp.status_code != 200:
                 raise HTTPException(status_code=404, detail=f"Remote icon returned {resp.status_code}")
             body = resp.read()
