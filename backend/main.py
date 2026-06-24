@@ -3,12 +3,14 @@ import json
 import os as _os
 import hashlib
 import base64
+import asyncio
 from datetime import datetime, date, timedelta
 from functools import wraps
 
 from fastapi import FastAPI, Request, HTTPException, Header
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
 import httpx
 
@@ -95,6 +97,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount /static/ for direct file serving (icon cache, uploads, etc.)
+# Cached icons are served at filesystem speed, bypassing Python route handlers
+_static_dir = _os.path.join(_os.path.dirname(__file__), "static")
+_os.makedirs(_static_dir, exist_ok=True)
+app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 
 # Manual Jinja2 setup
 _tpl_dir = _os.path.join(_os.path.dirname(__file__), "templates")
@@ -407,6 +415,44 @@ async def api_stats_overview(request: Request):
 @app.on_event("startup")
 async def startup():
     init_db()
+    # Pre-warm icon cache in background (don't block startup)
+    asyncio.create_task(_prewarm_icon_cache())
+
+
+async def _prewarm_icon_cache():
+    """Fetch all AI tool icons in the background and populate disk cache.
+    This ensures icons are served from local disk on first user request."""
+    conn = get_db()
+    tools = conn.execute(
+        "SELECT icon FROM posts WHERE category='AI Tool' AND status='active' AND icon LIKE 'http%'"
+    ).fetchall()
+    conn.close()
+
+    icons = [t["icon"].strip() for t in tools if t["icon"] and t["icon"].strip().startswith(("http://", "https://"))]
+    if not icons:
+        return
+
+    print(f"[icon-cache] Pre-warming {len(icons)} tool icons...")
+    cached = 0
+    for remote_url in icons:
+        cache_key = hashlib.sha256(remote_url.encode()).hexdigest()
+        cache_path = _os.path.join(ICON_CACHE_DIR, cache_key)
+        if _os.path.exists(cache_path):
+            cached += 1
+            continue
+        try:
+            async with httpx.AsyncClient(timeout=ICON_FETCH_TIMEOUT) as client:
+                resp = await client.get(remote_url, follow_redirects=True)
+                if resp.status_code == 200:
+                    body = resp.read()
+                    if len(body) <= ICON_MAX_SIZE:
+                        _os.makedirs(ICON_CACHE_DIR, exist_ok=True)
+                        with open(cache_path, "wb") as f:
+                            f.write(body)
+                        cached += 1
+        except Exception:
+            pass  # Individual failures are non-fatal; will retry on first user request
+    print(f"[icon-cache] Pre-warmed {cached}/{len(icons)} icons")
 
 # ===================== SOFTWARE (Admin) =====================
 
@@ -463,12 +509,11 @@ async def api_icon_proxy(url: str = ""):
     cache_key = hashlib.sha256(remote_url.encode()).hexdigest()
     cache_path = _os.path.join(ICON_CACHE_DIR, cache_key)
 
-    # Serve from disk cache if available
+    # Serve from disk cache if available (FileResponse = zero-copy, supports Range)
     if _os.path.exists(cache_path):
-        content_type = _guess_mime_from_path(cache_path)
-        return Response(
-            content=open(cache_path, "rb").read(),
-            media_type=content_type,
+        return FileResponse(
+            cache_path,
+            media_type=_guess_mime_from_path(cache_path),
             headers={"Cache-Control": "public, max-age=604800"},
         )
 
