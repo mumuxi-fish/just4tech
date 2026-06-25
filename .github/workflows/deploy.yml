@@ -48,13 +48,17 @@ jobs:
         run: |
           ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
             'API_KEY_FILE=/etc/aitoolhub/api_key; \
-             if [ ! -f "$API_KEY_FILE" ]; then \
-               sudo mkdir -p /etc/aitoolhub; \
+             sudo mkdir -p /etc/aitoolhub; \
+             if [ -n "${{ secrets.JUST4TECH_API_KEY }}" ]; then \
+               echo "${{ secrets.JUST4TECH_API_KEY }}" | sudo tee "$API_KEY_FILE" > /dev/null; \
+               sudo chmod 600 "$API_KEY_FILE"; \
+               echo "Using API_KEY from GitHub secrets"; \
+             elif [ ! -f "$API_KEY_FILE" ]; then \
                python3 -c "import secrets; print(secrets.token_hex(24))" | sudo tee "$API_KEY_FILE" > /dev/null; \
                sudo chmod 600 "$API_KEY_FILE"; \
-               echo "Generated new API_KEY"; \
+               echo "Generated new random API_KEY (set JUST4TECH_API_KEY secret to override)"; \
              else \
-               echo "API_KEY already exists"; \
+               echo "API_KEY unchanged"; \
              fi; \
              sudo mkdir -p /etc/systemd/system/aitoolhub-admin.service.d; \
              printf "[Service]\nEnvironmentFile=/etc/aitoolhub/api_key_env\n" | sudo tee /etc/systemd/system/aitoolhub-admin.service.d/override.conf > /dev/null; \
