@@ -226,7 +226,7 @@
 
 import { ref, computed, onMounted } from 'vue'
 import IconDisplay from '../components/IconDisplay.vue'
-import { usePageMeta } from '../utils/meta.js'
+import { usePageMeta, useJsonLd } from '../utils/meta.js'
 
 const aiTools = ref([])
 const posts = ref([])
@@ -245,6 +245,24 @@ const filteredPosts = computed(() => {
 
 
 onMounted(async () => {
+  usePageMeta({
+    title: '',
+    description: 'Indie dev stories, curated AI tools, and developer spotlights. Build better, ship faster.',
+    canonical: 'https://just4.tech/',
+  })
+  useJsonLd({
+    '@context': 'https://schema.org',
+    '@type': 'WebSite',
+    name: 'Just4Tech',
+    url: 'https://just4.tech/',
+    description: 'Indie dev stories, curated tools, and developer spotlights.',
+    potentialAction: {
+      '@type': 'SearchAction',
+      target: 'https://just4.tech/aitools?q={search_term_string}',
+      'query-input': 'required name=search_term_string',
+    },
+  })
+
   const [toolsData, postsData, projectsData] = await Promise.allSettled([
     fetch('/api/software').then(r => r.ok ? r.json() : []),
     fetch('/api/posts').then(r => r.ok ? r.json() : []),

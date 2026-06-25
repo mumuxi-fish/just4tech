@@ -67,7 +67,7 @@
 
 
 import { ref, computed, onMounted } from 'vue'
-import { usePageMeta } from '../utils/meta.js'
+import { usePageMeta, useJsonLd } from '../utils/meta.js'
 
 import { get } from '../api/index.js'
 
@@ -89,6 +89,25 @@ const filteredPosts = computed(() => {
 })
 
 onMounted(async () => {
+  usePageMeta({
+    title: 'Blog',
+    description: 'Indie dev experiences, tutorials, and tool reviews.',
+    canonical: 'https://just4.tech/blog',
+  })
+  useJsonLd({
+    '@context': 'https://schema.org',
+    '@type': 'Blog',
+    name: 'Just4Tech Blog',
+    url: 'https://just4.tech/blog',
+    description: 'Indie dev experiences, tutorials, and tool reviews.',
+    about: 'Indie development, AI tools, and shipping solo',
+    publisher: {
+      '@type': 'Organization',
+      name: 'Just4Tech',
+      url: 'https://just4.tech/',
+    },
+  })
+
   try {
     const data = await get('/api/posts')
     posts.value = (data || []).filter(p => p.status === 'active')
