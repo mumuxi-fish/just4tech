@@ -231,3 +231,32 @@ async def save_ai_settings(request: Request):
     conn.commit()
     conn.close()
     return {"ok": True}
+
+
+# ── Diagnostic: migration status (public, no auth) ────────────
+
+@router.get("/api/admin/migration-status")
+async def migration_status():
+    """Public diagnostic endpoint — shows which migrations have run."""
+    from migrations import get_migration_status
+    return get_migration_status()
+
+
+@router.post("/api/admin/migration-rerun")
+async def migration_rerun(request: Request):
+    """Force re-run a migration. Requires API key or admin session."""
+    from auth import check_session, require_api_key
+    if not check_session(request) and not require_api_key(request):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    data = await request.json()
+    name = data.get("name", "")
+    from migrations import run_migrations
+    from database import get_db
+    conn = get_db()
+    # Reset the migration flag so it runs again
+    conn.execute("DELETE FROM ai_config WHERE key = ?", (f"migration:{name}",))
+    conn.commit()
+    conn.close()
+    run_migrations()
+    from migrations import get_migration_status
+    return get_migration_status()

@@ -241,8 +241,27 @@ def run_migrations() -> None:
             func(conn)
             _mark_migration_done(conn, name)
             conn.commit()
+            logger.info("Migration %s: applied", name)
         except Exception:
             logger.exception("Migration %s failed", name)
             conn.rollback()
 
     conn.close()
+
+
+def get_migration_status() -> dict:
+    """Return status of all migrations (for diagnostics)."""
+    conn = get_db()
+    result = {}
+    for name, _ in MIGRATIONS:
+        result[name] = "done" if _is_migration_done(conn, name) else "pending"
+    # Also count posts and their date range
+    posts = conn.execute("SELECT created_at FROM posts ORDER BY created_at").fetchall()
+    if posts:
+        dates = [p["created_at"][:10] for p in posts]
+        result["post_count"] = len(posts)
+        result["date_min"] = min(dates)
+        result["date_max"] = max(dates)
+        result["unique_dates"] = len(set(dates))
+    conn.close()
+    return result

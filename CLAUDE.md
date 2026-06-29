@@ -3,7 +3,7 @@
 ## Project
 
 **just4.tech** — full-stack indie dev blog & AI tool directory.
-- Repo: `https://github.com/Aprilssky/just4tech`
+- Repo: `https://github.com/mumuxi-fish/just4tech`
 - Live: `https://just4.tech`
 - CI: GitHub Actions → push `main` → auto-deploy
 
